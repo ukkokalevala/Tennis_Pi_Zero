@@ -1,0 +1,71 @@
+import time
+from luma.core.interface.serial import i2c
+from luma.oled.device import ssd1306
+from luma.core.render import canvas
+from PIL import ImageDraw
+from smbus2 import SMBus
+
+# Initialize the OLED display
+serial = i2c(port=1, address=0x3C)
+device = ssd1306(serial)
+
+# Initialize I2C for the potentiometer (assuming PCF8591 ADC)
+bus = SMBus(1)
+pcf8591_address = 0x48
+
+# Game properties
+paddle_width = 2
+paddle_height = 12
+ball_radius = 3
+x = device.width // 2
+y = device.height // 2
+x_velocity = 2
+y_velocity = 2
+player_paddle_y = 0
+ai_paddle_y = 0
+ai_speed = 2
+
+def read_pot(channel):
+    bus.write_byte(pcf8591_address, channel)
+    return bus.read_byte(pcf8591_address)
+
+while True:
+    # Read potentiometer value
+    player_paddle_y = int(read_pot(0) / 255.0 * (device.height - paddle_height))
+
+    # AI paddle follows the ball
+    if ai_paddle_y + paddle_height / 2 < y:
+        ai_paddle_y += ai_speed
+    elif ai_paddle_y + paddle_height / 2 > y:
+        ai_paddle_y -= ai_speed
+
+    with canvas(device) as draw:
+        # Draw the ball
+        draw.ellipse((x - ball_radius, y - ball_radius, x + ball_radius, y + ball_radius), outline="white", fill="white")
+        # Draw the player's paddle
+        draw.rectangle((0, player_paddle_y, paddle_width, player_paddle_y + paddle_height), outline="white", fill="white")
+        # Draw the AI's paddle
+        draw.rectangle((device.width - paddle_width, ai_paddle_y, device.width, ai_paddle_y + paddle_height), outline="white", fill="white")
+
+    # Update ball position
+    x += x_velocity
+    y += y_velocity
+
+    # Collision with top and bottom
+    if y - ball_radius <= 0 or y + ball_radius >= device.height:
+        y_velocity = -y_velocity
+
+    # Collision with paddles
+    if x - ball_radius <= paddle_width and player_paddle_y <= y <= player_paddle_y + paddle_height:
+        x_velocity = -x_velocity
+    elif x + ball_radius >= device.width - paddle_width and ai_paddle_y <= y <= ai_paddle_y + paddle_height:
+        x_velocity = -x_velocity
+
+    # Ball out of bounds (reset the game)
+    if x - ball_radius <= 0 or x + ball_radius >= device.width:
+        x = device.width // 2
+        y = device.height // 2
+        time.sleep(0.5)  # Small delay before restarting
+
+    time.sleep(0.05)  # Control the speed of the game
+
